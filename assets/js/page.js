@@ -171,6 +171,77 @@
     }
   }
 
+  /* ---------- Keep every caption, bubble and sound effect inside its frame ----------
+     Positions in story.js are percentages chosen for the desktop page. On narrow screens
+     long lines wrap, so a box can spill out of its panel or land on another one. On phones
+     a crowded panel grows taller until its text fits; at every width bubbles and sound
+     effects are then nudged back inside the frame, and a panel that is still crowded gets
+     slightly smaller lettering. Layout properties only (top, left, aspect-ratio), so the
+     GSAP transforms used for the reveal animations are left alone. */
+  const PHONE = window.matchMedia("(max-width: 760px)");
+  const TALLER = [1, 0.8, 0.75, 2 / 3, 0.6, 0.5];
+  const EDGE = 8;
+  const boxOf = (n) => {
+    const t = n.dataset.tail || "", tail = !n.classList.contains("bubble") ? 0 : n.classList.contains("bubble--think") ? 24 : 14;
+    return { x: n.offsetLeft, y: n.offsetTop, w: n.offsetWidth, h: n.offsetHeight, up: t[0] === "t" ? tail : 0, down: t[0] === "b" ? tail : 0 };
+  };
+  const clash = (a, b) => a.x < b.x + b.w - 2 && b.x < a.x + a.w - 2 && a.y - a.up < b.y + b.h + b.down - 2 && b.y - b.up < a.y + a.h + a.down - 2;
+  function crowded(p) {
+    const W = p.clientWidth, H = p.clientHeight;
+    const bs = $$(".cap, .bubble", p).filter((n) => n.offsetParent).map(boxOf);
+    if (bs.some((b) => b.y - b.up < 0 || b.y + b.h + b.down > H || b.x < 0 || b.x + b.w > W)) return true;
+    for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) if (clash(bs[i], bs[j])) return true;
+    return false;
+  }
+  function restorePositions(p) {
+    $$(".bubble, .sfx", p).forEach((n) => {
+      const d = n.dataset;
+      if (!("top0" in d)) { d.top0 = n.style.top; d.left0 = n.style.left; d.my0 = n.style.getPropertyValue("--my"); }
+      n.style.top = d.top0;
+      n.style.left = d.left0;
+      if (d.my0) n.style.setProperty("--my", d.my0);
+    });
+  }
+  function nudgeInside(p) {
+    const W = p.clientWidth, H = p.clientHeight;
+    $$(".bubble, .sfx", p).filter((n) => n.offsetParent).forEach((n) => {
+      const b = boxOf(n), m = n.classList.contains("sfx") ? 4 : EDGE;
+      const y = Math.max(m + b.up, Math.min(b.y, H - b.h - b.down - m));
+      const x = Math.max(m, Math.min(b.x, W - b.w - m));
+      if (Math.abs(y - b.y) > 0.5) {
+        n.style.top = `${y}px`;
+        if (n.dataset.my0) n.style.setProperty("--my", `${y}px`);
+      }
+      if (Math.abs(x - b.x) > 0.5) n.style.left = `${x}px`;
+    });
+  }
+  function fitPanel(p) {
+    p.style.aspectRatio = "";
+    p.classList.remove("panel--tight");
+    restorePositions(p);
+    if (document.body.classList.contains("mode-director")) return;
+    if (PHONE.matches && crowded(p)) {
+      const now = p.clientWidth / p.clientHeight;
+      for (const r of TALLER) {
+        if (r >= now - 0.01) continue;
+        p.style.aspectRatio = String(r);
+        if (!crowded(p)) break;
+      }
+    }
+    nudgeInside(p);
+    if (crowded(p)) {
+      p.classList.add("panel--tight");
+      restorePositions(p);
+      nudgeInside(p);
+    }
+  }
+  let fitTimer = 0;
+  function fitPanels() {
+    $$(".panel").forEach(fitPanel);
+    if (window.ScrollTrigger) ScrollTrigger.refresh();
+  }
+  const fitSoon = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitPanels, 150); };
+
   /* ---------- Reading / Director's cut switch ---------- */
   function initModes() {
     const btns = $$(".modes button[data-mode]");
@@ -182,6 +253,7 @@
       const before = anchor.getBoundingClientRect().top;
       const state = hasGSAP && window.Flip && !K.reduced ? Flip.getState(panels.concat($$(".panel__art"))) : null;
       document.body.classList.toggle("mode-director", director);
+      $$(".panel").forEach(fitPanel);
       btns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
       panels.forEach((p) => { p.style.clipPath = ""; });
       $$(".cap, .bubble, .sfx").forEach((n) => { n.style.opacity = ""; });
@@ -356,6 +428,9 @@
   /* ---------- Boot ---------- */
   renderCast();
   renderReader();
+  fitPanels();
+  if (document.fonts) document.fonts.ready.then(fitPanels);
+  addEventListener("resize", fitSoon);
   initHero();
   initModes();
   initAnimatic();
