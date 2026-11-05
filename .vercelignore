@@ -3,3 +3,5 @@ tools
 .vercel
 .env*
 .gitignore
+docs
+README.md
